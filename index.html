@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ball Clicker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #fefce8; /* Light yellow background */
+            color: #1f2937; /* Dark gray text */
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .game-container {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            cursor: crosshair;
+        }
+
+        .ball {
+            position: absolute;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: transform 0.1s ease-out, opacity 0.2s ease-out;
+            animation: move 10s linear infinite alternate;
+            border: 1px solid rgba(0,0,0,0.1); /* Added a subtle border */
+        }
+
+        .ball:hover {
+            transform: scale(1.1);
+        }
+        
+        /* Removed the .glow-* classes */
+
+        /* Different movement animations for variety */
+        @keyframes move {
+            0% { transform: translate(0, 0); }
+            25% { transform: translate(calc(var(--vx) * 20vw), calc(var(--vy) * 20vh)); }
+            50% { transform: translate(calc(var(--vx) * -30vw), calc(var(--vy) * 30vh)); }
+            75% { transform: translate(calc(var(--vx) * 10vw), calc(var(--vy) * -40vh)); }
+            100% { transform: translate(0, 0); }
+        }
+        
+        @keyframes move-alt {
+            0% { transform: translate(0, 0) rotate(0deg); }
+            100% { transform: translate(calc(var(--vx) * 80vw), calc(var(--vy) * 80vh)) rotate(360deg); }
+        }
+        
+        .modal {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5); /* Darkened the modal overlay slightly */
+            z-index: 100;
+        }
+        
+        .modal-content {
+            background-color: #ffffff; /* White modal background */
+            padding: 2rem;
+            border-radius: 1rem;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb; /* Light gray border */
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gameContainer" class="game-container hidden">
+        <!-- Scoreboard -->
+        <div class="absolute top-4 left-4 text-lg bg-yellow-100/80 px-4 py-2 rounded-lg">Score: <span id="score">0</span></div>
+        <div class="absolute top-4 right-4 text-lg bg-yellow-100/80 px-4 py-2 rounded-lg">High Score: <span id="highScore">0</span></div>
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-lg bg-yellow-100/80 px-4 py-2 rounded-lg">Time: <span id="timer">30</span>s</div>
+    </div>
+
+    <!-- Start Modal -->
+    <div id="startModal" class="modal">
+        <div class="modal-content">
+            <h1 class="text-4xl font-bold mb-2">Ball Clicker</h1>
+            <p class="text-gray-600 mb-6">Click as many balls as you can in 30 seconds.</p>
+            <div class="text-left mb-6 space-y-2">
+                <!-- Updated text colors for new theme -->
+                <p><span class="font-bold text-blue-600">Large Ball:</span> 1 Point</p>
+                <p><span class="font-bold text-purple-600">Medium Ball:</span> 3 Points</p>
+                <p><span class="font-bold text-red-600">Small Ball:</span> 5 Points</p>
+            </div>
+            <button id="startButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-xl transition-transform transform hover:scale-105">
+                Start Game
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over Modal -->
+    <div id="gameOverModal" class="modal hidden">
+        <div class="modal-content">
+            <h1 class="text-4xl font-bold mb-2">Game Over!</h1>
+            <p class="text-2xl mb-1">Your Score: <span id="finalScore">0</span></p>
+            <p id="newHighScoreText" class="text-amber-500 font-semibold mb-6 hidden">New High Score!</p>
+            <button id="restartButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-xl transition-transform transform hover:scale-105">
+                Play Again
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const gameContainer = document.getElementById('gameContainer');
+        const scoreEl = document.getElementById('score');
+        const highScoreEl = document.getElementById('highScore');
+        const timerEl = document.getElementById('timer');
+        const startModal = document.getElementById('startModal');
+        const gameOverModal = document.getElementById('gameOverModal');
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const finalScoreEl = document.getElementById('finalScore');
+        const newHighScoreText = document.getElementById('newHighScoreText');
+
+        // Game State
+        let score = 0;
+        let highScore = localStorage.getItem('ballClickerHighScore') || 0; // Changed key slightly
+        let timeLeft = 30;
+        let gameInterval = null;
+        let timerInterval = null;
+
+        // --- Audio Setup (Tone.js) ---
+        const popSynth = new Tone.Synth({
+            oscillator: { type: 'triangle' },
+            envelope: { attack: 0.01, decay: 0.1, sustain: 0.2, release: 0.2 }
+        }).toDestination();
+
+        const musicSynth = new Tone.MembraneSynth().toDestination();
+        const musicLoop = new Tone.Loop(time => {
+            musicSynth.triggerAttackRelease('C1', '8n', time);
+        }, '4n');
+        Tone.Transport.bpm.value = 100;
+        
+        // --- Game Logic ---
+
+        function updateHighScoreDisplay() {
+            highScoreEl.textContent = highScore;
+        }
+
+        function startGame() {
+            Tone.start();
+            
+            score = 0;
+            timeLeft = 30;
+            scoreEl.textContent = score;
+            timerEl.textContent = timeLeft;
+            newHighScoreText.classList.add('hidden');
+
+            startModal.classList.add('hidden');
+            gameOverModal.classList.add('hidden');
+            gameContainer.classList.remove('hidden');
+
+            gameInterval = setInterval(createBall, 600);
+            
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                timerEl.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                    endGame();
+                }
+            }, 1000);
+
+            Tone.Transport.start();
+            musicLoop.start(0);
+        }
+
+        function endGame() {
+            clearInterval(gameInterval);
+            clearInterval(timerInterval);
+            
+            musicLoop.stop();
+            Tone.Transport.stop();
+
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('ballClickerHighScore', highScore);
+                updateHighScoreDisplay();
+                newHighScoreText.classList.remove('hidden');
+            }
+
+            finalScoreEl.textContent = score;
+            gameContainer.classList.add('hidden');
+            gameOverModal.classList.remove('hidden');
+
+            document.querySelectorAll('.ball').forEach(ball => ball.remove());
+        }
+
+        function createBall() {
+            const ball = document.createElement('div');
+            ball.classList.add('ball');
+
+            // Randomize size, points, and color directly
+            const sizeRoll = Math.random();
+            let size, points, color;
+            if (sizeRoll > 0.8) { // Small ball (20%)
+                size = 30;
+                points = 5;
+                color = '#ef4444'; // Solid Red
+            } else if (sizeRoll > 0.4) { // Medium ball (40%)
+                size = 50;
+                points = 3;
+                color = '#8b5cf6'; // Solid Purple
+            } else { // Large ball (40%)
+                size = 70;
+                points = 1;
+                color = '#3b82f6'; // Solid Blue
+            }
+            
+            ball.style.width = `${size}px`;
+            ball.style.height = `${size}px`;
+            ball.style.backgroundColor = color;
+            ball.dataset.points = points;
+
+            // Randomize position
+            const x = Math.random() * (window.innerWidth - size);
+            const y = Math.random() * (window.innerHeight - size);
+            ball.style.top = `${y}px`;
+            ball.style.left = `${x}px`;
+            
+            // Randomize animation
+            ball.style.setProperty('--vx', Math.random() > 0.5 ? 1 : -1);
+            ball.style.setProperty('--vy', Math.random() > 0.5 ? 1 : -1);
+            ball.style.animationName = Math.random() > 0.5 ? 'move' : 'move-alt';
+            ball.style.animationDuration = `${Math.random() * 5 + 8}s`;
+
+            ball.addEventListener('click', handleBallClick);
+
+            gameContainer.appendChild(ball);
+            
+            setTimeout(() => {
+                if (ball) ball.remove();
+            }, 13000); 
+        }
+
+        function handleBallClick(e) {
+            e.stopPropagation();
+            const ball = e.target;
+            
+            popSynth.triggerAttackRelease('C5', '8n');
+
+            score += parseInt(ball.dataset.points);
+            scoreEl.textContent = score;
+
+            ball.style.transform = 'scale(1.5)';
+            ball.style.opacity = '0';
+
+            setTimeout(() => {
+                ball.remove();
+            }, 200);
+        }
+
+        // --- Event Listeners ---
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', startGame);
+
+        // --- Initial Setup ---
+        window.onload = () => {
+            updateHighScoreDisplay();
+        };
+    </script>
+</body>
+</html>
